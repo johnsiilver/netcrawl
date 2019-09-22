@@ -1,4 +1,4 @@
-// Package statemachine provides a statemachine for processing CDP information into our network.Node. 
+// Package statemachine provides a statemachine for processing CDP information into our network.Node.
 package statemachine
 
 import (
@@ -14,8 +14,8 @@ import (
 // CDP is a statemachine for using a halfpike.Parser to extract data from text into a Node.
 // This is used in a halfpike.Parse() and not intended to run on its own.
 type CDP struct {
-	node    *network.Node
-	current *network.Node
+	node         *network.Node
+	current      *network.Node
 	foundDevices bool
 }
 
@@ -34,7 +34,7 @@ func (c *CDP) findDeviceID(ctx context.Context, p *halfpike.Parser) halfpike.Par
 	if err != nil {
 		if c.foundDevices {
 			return nil
-		}else{
+		} else {
 			return p.Errorf("did not find any devices listed")
 		}
 	}

@@ -2,8 +2,8 @@ package statemachine
 
 import (
 	"context"
-	"testing"
 	"net"
+	"testing"
 
 	"github.com/johnsiilver/netcrawl/network"
 
@@ -76,15 +76,15 @@ Management address(es):
 
 	want := map[network.NodeInterface]*network.Node{
 		"FastEthernet0/12": &network.Node{
-			IP: net.ParseIP("192.168.1.243"),
+			IP:   net.ParseIP("192.168.1.243"),
 			Type: "cisco WS-C2950-12",
 		},
 		"FastEthernet0/3": &network.Node{
-			IP: net.ParseIP("192.168.1.240"),
+			IP:   net.ParseIP("192.168.1.240"),
 			Type: "Cisco 2621XM",
 		},
 		"FastEthernet0/1": &network.Node{
-			IP: net.ParseIP("192.168.1.103"),
+			IP:   net.ParseIP("192.168.1.103"),
 			Type: "AIR-AP350",
 		},
 	}

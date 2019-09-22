@@ -2,17 +2,17 @@ package explorer
 
 import (
 	"context"
-	"testing"
 	"fmt"
 	"net"
 	"sort"
+	"testing"
 
+	"github.com/johnsiilver/netcrawl/explorer/config"
+	sshCDP "github.com/johnsiilver/netcrawl/explorer/internal/cli/cdp"
 	"github.com/johnsiilver/netcrawl/network"
-
-	"golang.org/x/crypto/ssh"
 )
 
-var outputMap = map[string]interface{} {
+var outputMap = map[string]interface{}{
 	// NodeA has connections to nodeB/C/D
 	"192.168.0.1": `
 Device ID: nodeB
@@ -206,70 +206,30 @@ Management address(es):
 }
 
 func init() {
-	dialer = func(node string, config *ssh.ClientConfig) (client, error) {
-		if _, ok := outputMap[node]; !ok {
-			return nil, fmt.Errorf("could not connect to node %s", node)
-		}
-		return fakeClient{ipStr: node}, nil
-	}
+	sshCDP.FakeDialer(outputMap)
 }
 
-type fakeConn struct {}
-
-func (fakeConn) close() {}
-
-type fakeSession struct {
-	ipStr string
-}
-
-// combinedOutput implements session.combinedOutput().
-func (s fakeSession) combinedOutput(cmd string) ([]byte, error) {
-	out := outputMap[s.ipStr]
-	switch v := out.(type) {
-	case string:
-		return []byte(v), nil
-	case error:
-		return nil, v
-	default:
-		panic(fmt.Sprintf("unknown ipStr type %T", out))
-	}
-}
-
-func (fakeSession) close() {}
-
-type fakeClient struct {
-	ipStr string
-}
-
-func (fakeClient) conn() conn {
-	return fakeConn{}
-}
-
-func (s fakeClient) newSession() (session, error) {
-	return fakeSession{ipStr: s.ipStr}, nil
-}
-
-// Note: Tests could be much better, we don't test 
+// Note: Tests could be much better, we don't test
 func TestExplorer(t *testing.T) {
 	const switchType = "cisco WS-C2950-12"
 	nodeA := &network.Node{
-		IP: net.ParseIP("192.168.0.1"),
+		IP:   net.ParseIP("192.168.0.1"),
 		Type: typeRoot,
 	}
 	nodeB := &network.Node{
-		IP: net.ParseIP("192.168.0.2"),
+		IP:   net.ParseIP("192.168.0.2"),
 		Type: switchType,
 	}
 	nodeC := &network.Node{
-		IP: net.ParseIP("192.168.0.3"),
+		IP:   net.ParseIP("192.168.0.3"),
 		Type: switchType,
 	}
 	nodeD := &network.Node{
-		IP: net.ParseIP("192.168.0.4"),
+		IP:   net.ParseIP("192.168.0.4"),
 		Type: switchType,
 	}
 	nodeE := &network.Node{
-		IP: net.ParseIP("192.168.0.5"),
+		IP:   net.ParseIP("192.168.0.5"),
 		Type: switchType,
 	}
 
@@ -288,7 +248,12 @@ func TestExplorer(t *testing.T) {
 	nodeD.SetNeighbor("FastEthernet0/2", nodeB)
 	nodeD.SetNeighbor("FastEthernet0/3", nodeE)
 
-	network, err := New("192.168.0.1", "user", "pass")
+	conf := config.Config{
+		SSHConn: []config.SSH{
+			{User: "user", Pass: "pass"},
+		},
+	}
+	network, err := New("192.168.0.1", conf)
 	if err != nil {
 		t.Fatalf("TestExplorer: New() had error: %s", err)
 	}
@@ -322,14 +287,14 @@ func (e *equal) check(want, got *network.Node) error {
 	if want.IP.String() != got.IP.String() {
 		return fmt.Errorf("want node is IP %s, got node is IP %s", want.IP.String(), got.IP.String())
 	}
-	
+
 	if want.Type != got.Type {
 		return fmt.Errorf("want node(%s) had type %s, got node(%s) has type %s", want.IP.String(), want.Type, got.IP.String(), got.Type)
 	}
 
 	if len(want.Neighbors) != len(got.Neighbors) {
-		return fmt.Errorf("want node(%s) had neighbors %q, got node(%s) had neighbors %q", 
-		want.IP.String(), neighborsList(want.Neighbors), got.IP.String(), neighborsList(got.Neighbors))
+		return fmt.Errorf("want node(%s) had neighbors %q, got node(%s) had neighbors %q",
+			want.IP.String(), neighborsList(want.Neighbors), got.IP.String(), neighborsList(got.Neighbors))
 	}
 
 	if want.Error != nil || got.Error != nil {
@@ -359,13 +324,3 @@ func neighborsList(m map[network.NodeInterface]*network.Node) []string {
 	sort.Strings(list)
 	return list
 }
-
-
-
-
-
-
-
-
-
-

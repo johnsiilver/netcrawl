@@ -30,11 +30,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"time"
 
-	"github.com/johnsiilver/halfpike"
-	"golang.org/x/crypto/ssh"
-	"github.com/johnsiilver/netcrawl/internal/statemachine"
+	"github.com/johnsiilver/netcrawl/explorer/config"
 	"github.com/johnsiilver/netcrawl/network"
 )
 
@@ -47,15 +44,17 @@ type LoginDeny struct {
 }
 
 type Results struct {
-	NetworkMap *network.Node
-	LoginDeny []LoginDeny
+	NetworkMap  *network.Node
+	LoginDeny   []LoginDeny
 	ParseErrors []error
 }
 
 // Network is used to explorer the network
 type Network struct {
-	root       *network.Node
-	user, pass string
+	root   *network.Node
+	config config.Config
+
+	discNodes []config.Discover
 
 	error      error
 	loginDeny  []LoginDeny
@@ -69,7 +68,7 @@ type Network struct {
 const typeRoot = "RootNode"
 
 // New is the constructor for Network.
-func New(root, user, pass string) (*Network, error) {
+func New(root string, conf config.Config) (*Network, error) {
 	ip := net.ParseIP(root)
 	if ip == nil {
 		ips, err := net.LookupIP(root)
@@ -78,12 +77,22 @@ func New(root, user, pass string) (*Network, error) {
 		}
 		ip = ips[0]
 	}
-	n := &network.Node{IP: ip, Type: typeRoot}
+	rootNode := &network.Node{IP: ip, Type: typeRoot}
+
+	disc, err := conf.Discoveries()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(disc) == 0 {
+		return nil, fmt.Errorf("the configuration passed to explorer.New() did not have any network discovery methods configured")
+	}
+
 	return &Network{
-		root: n,
-		seen: map[string]*network.Node{ip.String(): n},
-		user: user,
-		pass: pass,
+		root:      rootNode,
+		discNodes: disc,
+		config:    conf,
+		seen:      map[string]*network.Node{ip.String(): rootNode},
 	}, nil
 }
 
@@ -98,8 +107,8 @@ func (e *Network) Explore(ctx context.Context) (Results, error) {
 	}
 
 	return Results{
-		NetworkMap: e.root,
-		LoginDeny: e.loginDeny,
+		NetworkMap:  e.root,
+		LoginDeny:   e.loginDeny,
 		ParseErrors: e.parseError,
 	}, nil
 }
@@ -119,8 +128,18 @@ func (e *Network) seenNode(n *network.Node) *network.Node {
 func (e *Network) processNode(ctx context.Context, node, parent *network.Node, inter network.NodeInterface) {
 	defer e.wg.Done()
 
-	b, err := e.runCDPNeighbor(node.IP)
-	if err != nil {
+	var err error
+	var found bool
+	for _, disc := range e.discNodes {
+		inErr := disc.Node(ctx, node)
+		if inErr == nil {
+			found = true
+			break
+		}
+		err = fmt.Errorf("%s %w", inErr, err)
+	}
+
+	if !found {
 		if parent == nil {
 			e.error = fmt.Errorf("could not connect to root node: %s", err)
 			return
@@ -129,22 +148,6 @@ func (e *Network) processNode(ctx context.Context, node, parent *network.Node, i
 		return
 	}
 
-	parser, err := halfpike.NewParser(string(b), node)
-	if err != nil {
-		e.error = err
-		return
-	}
-
-	sm := &statemachine.CDP{}
-
-	if err := halfpike.Parse(ctx, parser, sm.Start); err != nil {
-		if parent == nil {
-			e.error = fmt.Errorf("problems reading CDP from root node")
-			return
-		}
-		e.parseError = append(e.parseError, err)
-		return
-	}
 	if parent != nil {
 		parent.SetNeighbor(inter, node)
 	}
@@ -169,34 +172,6 @@ func (e *Network) walkChildren(ctx context.Context, parent *network.Node, inter 
 	}
 }
 
-func (e *Network) runCDPNeighbor(nodeIP net.IP) ([]byte, error) {
-	config := ssh.ClientConfig{
-		User: e.user,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(e.pass),
-		},
-		Timeout: 5 * time.Second,
-	}
-
-	cli, err := dialer(nodeIP.String(), &config)
-	if err != nil {
-		return nil, fmt.Errorf("could not connect to root node at: %s", nodeIP)
-	}
-	defer cli.conn().close()
-
-	session, err := cli.newSession()
-	if err != nil {
-		return nil, fmt.Errorf("could not create session to node(%s): %s", nodeIP, err)
-	}
-	defer session.close()
-
-	b, err := session.combinedOutput("show cdp neighbors detail")
-	if err != nil {
-		return nil, fmt.Errorf("problem executing 'show cdp neighbors detail' on node(%s): %s", nodeIP, err)
-	}
-	return b, nil
-}
-
 // List provides a method for walking the network.Node tree and returning a list of all Nodes
 // without falling into a recursive loop.
 type List struct {
@@ -205,7 +180,7 @@ type List struct {
 }
 
 // List turns the tree into a slice.
-func (l *List) List(n *network.Node) []*network.Node{
+func (l *List) List(n *network.Node) []*network.Node {
 	l.seen = map[string]bool{}
 	l.list = []*network.Node{}
 	l.walk(n)
@@ -213,7 +188,7 @@ func (l *List) List(n *network.Node) []*network.Node{
 }
 
 func (l *List) walk(n *network.Node) {
-	if l.seen[n.IP.String()]{
+	if l.seen[n.IP.String()] {
 		return
 	}
 	l.seen[n.IP.String()] = true
